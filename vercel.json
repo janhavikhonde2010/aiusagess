@@ -1,0 +1,22 @@
+{
+  "functions": {
+    "api/index.ts": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  },
+  "routes": [
+    {
+      "src": "^/api/(.*)$",
+      "dest": "/api/index.ts"
+    },
+    {
+      "src": "^/assets/(.*)$",
+      "dest": "/spa/assets/$1"
+    },
+    {
+      "src": "^/(.*)$",
+      "dest": "/spa/index.html"
+    }
+  ]
+}
