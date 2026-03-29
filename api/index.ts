@@ -23,6 +23,9 @@ export default async function handler(
     );
 
     const data = await response.json();
+
+    console.log("OPENAI RAW DATA:", data); // 🔥 debug
+
     const usage = data?.data || [];
 
     let totalTokens = 0;
@@ -36,9 +39,8 @@ export default async function handler(
     return res.status(200).json({
       totalTokens,
       totalCost,
-      startDate: new Date().toISOString(), // ✅ prevent invalid date
-      endDate: new Date().toISOString(),   // ✅ prevent invalid date
-      usage: usage || [],                  // optional (safe)
+      count: usage.length, // 👈 check if data exists
+      raw: data, // 👈 debug in frontend
     });
 
   } catch (error) {
