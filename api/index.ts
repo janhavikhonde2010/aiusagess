@@ -23,7 +23,6 @@ export default async function handler(
     );
 
     const data = await response.json();
-
     const usage = data?.data || [];
 
     let totalTokens = 0;
@@ -37,7 +36,11 @@ export default async function handler(
     return res.status(200).json({
       totalTokens,
       totalCost,
+      startDate: new Date().toISOString(), // ✅ prevent invalid date
+      endDate: new Date().toISOString(),   // ✅ prevent invalid date
+      usage: usage || [],                  // optional (safe)
     });
+
   } catch (error) {
     console.error("ERROR:", error);
     return res.status(500).json({ error: "Server error" });
