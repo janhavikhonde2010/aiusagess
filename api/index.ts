@@ -24,7 +24,7 @@ export default async function handler(
 
     const data = await response.json();
 
-    console.log("OPENAI RAW DATA:", data); // 🔥 debug
+    console.log("OPENAI RAW DATA:", data);
 
     const usage = data?.data || [];
 
@@ -39,12 +39,21 @@ export default async function handler(
     return res.status(200).json({
       totalTokens,
       totalCost,
-      count: usage.length, // 👈 check if data exists
-      raw: data, // 👈 debug in frontend
+      count: usage.length,
+      startDate: new Date().toISOString(), // ✅ always valid
+      endDate: new Date().toISOString(),   // ✅ always valid
+      usage: usage || [],                  // ✅ safe fallback
     });
 
   } catch (error) {
     console.error("ERROR:", error);
-    return res.status(500).json({ error: "Server error" });
+    return res.status(500).json({
+      error: "Server error",
+      totalTokens: 0,
+      totalCost: 0,
+      startDate: new Date().toISOString(),
+      endDate: new Date().toISOString(),
+      usage: [],
+    });
   }
 }
