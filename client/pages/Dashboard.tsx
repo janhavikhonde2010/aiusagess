@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format, subDays } from "date-fns";
 import {
@@ -12,6 +12,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
 } from "recharts";
 import {
@@ -28,6 +29,8 @@ import {
   ChevronDown,
   ChevronUp,
   FolderOpen,
+  TableProperties,
+  LayoutList,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -68,18 +71,20 @@ const PRESETS = [
 const PROJECT_COLORS = [
   "#FF7615", "#3b82f6", "#10b981", "#a855f7",
   "#f43f5e", "#f59e0b", "#06b6d4", "#84cc16",
+  "#ec4899", "#14b8a6", "#8b5cf6", "#ef4444",
 ];
 
 /* ================================================================
    MAIN COMPONENT
 ================================================================ */
 export default function Dashboard() {
-  const [adminKey, setAdminKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [startDate, setStartDate] = useState(format(subDays(new Date(), 30), "yyyy-MM-dd"));
-  const [endDate, setEndDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [adminKey, setAdminKey]     = useState("");
+  const [showKey, setShowKey]       = useState(false);
+  const [startDate, setStartDate]   = useState(format(subDays(new Date(), 30), "yyyy-MM-dd"));
+  const [endDate, setEndDate]       = useState(format(new Date(), "yyyy-MM-dd"));
   const [fetchParams, setFetchParams] = useState<null | { adminKey: string; startDate: string; endDate: string }>(null);
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
+  const [activeTab, setActiveTab]   = useState<"projects" | "daywise">("projects");
 
   const isValidKey = adminKey.trim().length > 10;
 
@@ -105,6 +110,7 @@ export default function Dashboard() {
   const handleSearch = () => {
     if (!isValidKey) return;
     setExpandedProject(null);
+    setActiveTab("projects");
     setFetchParams({ adminKey: adminKey.trim(), startDate, endDate });
   };
 
@@ -113,8 +119,32 @@ export default function Dashboard() {
     setEndDate(format(new Date(), "yyyy-MM-dd"));
   };
 
+  /* Build day-wise stacked chart data + table rows */
+  const { dayChartData, allDays } = useMemo(() => {
+    if (!data?.projects?.length) return { dayChartData: [], allDays: [] };
+
+    const days = data.dailyUsage.map((d) => d.day);
+
+    const chartData = days.map((day) => {
+      const row: Record<string, any> = { day };
+      let total = 0;
+      for (const proj of data.projects) {
+        const du = proj.dailyUsage.find((d) => d.day === day);
+        const tokens = du?.tokens ?? 0;
+        row[proj.projectName] = tokens;
+        row[`${proj.projectName}__cost`] = du?.cost ?? 0;
+        total += tokens;
+      }
+      row["__total"] = total;
+      return row;
+    });
+
+    return { dayChartData: chartData, allDays: days };
+  }, [data]);
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen bg-background text-foreground">
+
       {/* HEADER */}
       <header className="sticky top-0 z-50 glass">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center gap-3">
@@ -126,6 +156,7 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-6 py-10 space-y-8">
+
         {/* FILTER CARD */}
         <motion.div initial={{ y: 20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="glass-card rounded-3xl p-8 space-y-6">
           <div>
@@ -149,11 +180,8 @@ export default function Dashboard() {
                 onChange={(e) => setAdminKey(e.target.value)}
                 className="pr-10"
               />
-              <button
-                type="button"
-                onClick={() => setShowKey((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
+              <button type="button" onClick={() => setShowKey((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
@@ -168,11 +196,8 @@ export default function Dashboard() {
             </label>
             <div className="flex flex-wrap gap-2">
               {PRESETS.map((p) => (
-                <button
-                  key={p.label}
-                  onClick={() => applyPreset(p.days)}
-                  className="px-3 py-1 text-xs rounded-full border border-primary/30 hover:bg-primary/10 text-primary transition"
-                >
+                <button key={p.label} onClick={() => applyPreset(p.days)}
+                  className="px-3 py-1 text-xs rounded-full border border-primary/30 hover:bg-primary/10 text-primary transition">
                   {p.label}
                 </button>
               ))}
@@ -213,26 +238,21 @@ export default function Dashboard() {
           {data && (
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-8">
 
-              {/* ORG SUMMARY CARDS */}
+              {/* SUMMARY CARDS */}
               <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                <SummaryCard title="Total Tokens" value={compactNum(data.totalTokens)} icon={<Zap size={20} />} color="from-orange-500 to-amber-400" />
-                <SummaryCard title="Total Cost" value={`$${data.totalCost.toFixed(4)}`} icon={<DollarSign size={20} />} color="from-emerald-500 to-teal-400" />
-                <SummaryCard title="Total Requests" value={data.totalRequests.toLocaleString()} icon={<Activity size={20} />} color="from-blue-500 to-indigo-400" />
-                <SummaryCard
-                  title="Projects Found"
-                  value={String(data.projects.length)}
-                  icon={<FolderOpen size={20} />}
-                  color="from-purple-500 to-pink-400"
-                />
+                <SummaryCard title="Total Tokens"    value={compactNum(data.totalTokens)}             icon={<Zap size={20} />}        color="from-orange-500 to-amber-400" />
+                <SummaryCard title="Total Cost"      value={`$${data.totalCost.toFixed(4)}`}          icon={<DollarSign size={20} />} color="from-emerald-500 to-teal-400" />
+                <SummaryCard title="Total Requests"  value={data.totalRequests.toLocaleString()}       icon={<Activity size={20} />}   color="from-blue-500 to-indigo-400" />
+                <SummaryCard title="Projects Found"  value={String(data.projects.length)}             icon={<FolderOpen size={20} />} color="from-purple-500 to-pink-400" />
               </div>
 
-              {/* ORG-WIDE DAILY CHARTS */}
+              {/* ORG-WIDE AREA CHART */}
               <ChartCard title="Organization — Daily Token Usage" icon={<TrendingUp size={18} className="text-primary" />}>
-                <ResponsiveContainer width="100%" height={280}>
+                <ResponsiveContainer width="100%" height={260}>
                   <AreaChart data={data.dailyUsage}>
                     <defs>
-                      <linearGradient id="orgTokenGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#FF7615" stopOpacity={0.3} />
+                      <linearGradient id="orgGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%"  stopColor="#FF7615" stopOpacity={0.3} />
                         <stop offset="95%" stopColor="#FF7615" stopOpacity={0} />
                       </linearGradient>
                     </defs>
@@ -240,130 +260,275 @@ export default function Dashboard() {
                     <XAxis dataKey="day" tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={fmtDay} />
                     <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} width={65} allowDecimals={false} tickFormatter={compactNum} />
                     <Tooltip formatter={(v: number) => [v.toLocaleString(), "Tokens"]} labelFormatter={fmtDay} />
-                    <Area type="monotone" dataKey="tokens" stroke="#FF7615" strokeWidth={2.5} fill="url(#orgTokenGrad)" dot={{ r: 3 }} activeDot={{ r: 6 }} />
+                    <Area type="monotone" dataKey="tokens" stroke="#FF7615" strokeWidth={2.5} fill="url(#orgGrad)" dot={{ r: 3 }} activeDot={{ r: 6 }} />
                   </AreaChart>
                 </ResponsiveContainer>
               </ChartCard>
 
-              {/* PROJECTS TABLE + EXPANDABLE DETAIL */}
-              <ChartCard title="Projects Breakdown" icon={<FolderOpen size={18} className="text-purple-500" />}>
-                <div className="space-y-3">
-                  {data.projects.length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-6">No usage data found for this period.</p>
-                  )}
-                  {data.projects.map((proj, idx) => {
-                    const color = PROJECT_COLORS[idx % PROJECT_COLORS.length];
-                    const isOpen = expandedProject === proj.projectId;
-                    const pct = data.totalTokens > 0 ? (proj.totalTokens / data.totalTokens) * 100 : 0;
+              {/* TABS */}
+              <div className="flex gap-2">
+                <TabBtn active={activeTab === "projects"} onClick={() => setActiveTab("projects")} icon={<LayoutList size={15} />}>
+                  By Project
+                </TabBtn>
+                <TabBtn active={activeTab === "daywise"} onClick={() => setActiveTab("daywise")} icon={<TableProperties size={15} />}>
+                  Day-wise
+                </TabBtn>
+              </div>
 
-                    return (
-                      <div key={proj.projectId} className="border rounded-2xl overflow-hidden">
-                        {/* Row header */}
-                        <button
-                          onClick={() => setExpandedProject(isOpen ? null : proj.projectId)}
-                          className="w-full flex items-center gap-4 p-4 hover:bg-muted/40 transition text-left"
-                        >
-                          <div className="w-3 h-3 rounded-full shrink-0" style={{ background: color }} />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-sm truncate">{proj.projectName}</p>
-                            <p className="text-xs text-muted-foreground font-mono truncate">{proj.projectId}</p>
-                          </div>
-                          <div className="text-right shrink-0 space-y-1">
-                            <p className="text-sm font-semibold">{compactNum(proj.totalTokens)} tokens</p>
-                            <p className="text-xs text-emerald-600">${proj.totalCost.toFixed(4)}</p>
-                          </div>
-                          <div className="w-24 shrink-0 hidden sm:block">
-                            <div className="h-2 rounded-full bg-muted overflow-hidden">
-                              <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: color }} />
+              {/* ===== PROJECTS TAB ===== */}
+              {activeTab === "projects" && (
+                <ChartCard title="Projects Breakdown" icon={<FolderOpen size={18} className="text-purple-500" />}>
+                  <div className="space-y-3">
+                    {data.projects.length === 0 && (
+                      <p className="text-sm text-muted-foreground text-center py-6">No usage data found for this period.</p>
+                    )}
+                    {data.projects.map((proj, idx) => {
+                      const color = PROJECT_COLORS[idx % PROJECT_COLORS.length];
+                      const isOpen = expandedProject === proj.projectId;
+                      const pct = data.totalTokens > 0 ? (proj.totalTokens / data.totalTokens) * 100 : 0;
+
+                      return (
+                        <div key={proj.projectId} className="border rounded-2xl overflow-hidden">
+                          <button onClick={() => setExpandedProject(isOpen ? null : proj.projectId)}
+                            className="w-full flex items-center gap-4 p-4 hover:bg-muted/40 transition text-left">
+                            <div className="w-3 h-3 rounded-full shrink-0" style={{ background: color }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-sm truncate">{proj.projectName}</p>
+                              <p className="text-xs text-muted-foreground font-mono truncate">{proj.projectId}</p>
                             </div>
-                            <p className="text-xs text-muted-foreground mt-0.5 text-right">{pct.toFixed(1)}%</p>
-                          </div>
-                          <div className="shrink-0 text-muted-foreground">
-                            {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          </div>
-                        </button>
-
-                        {/* Expanded detail */}
-                        <AnimatePresence>
-                          {isOpen && (
-                            <motion.div
-                              initial={{ height: 0, opacity: 0 }}
-                              animate={{ height: "auto", opacity: 1 }}
-                              exit={{ height: 0, opacity: 0 }}
-                              transition={{ duration: 0.25 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="p-4 pt-0 space-y-6 border-t bg-muted/20">
-                                {/* Mini stats */}
-                                <div className="grid grid-cols-3 gap-3 pt-4">
-                                  <MiniStat label="Tokens" value={proj.totalTokens.toLocaleString()} color={color} />
-                                  <MiniStat label="Cost" value={`$${proj.totalCost.toFixed(6)}`} color={color} />
-                                  <MiniStat label="Requests" value={proj.totalRequests.toLocaleString()} color={color} />
-                                </div>
-
-                                {/* Daily tokens chart */}
-                                <div>
-                                  <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Daily Tokens</p>
-                                  <ResponsiveContainer width="100%" height={180}>
-                                    <BarChart data={proj.dailyUsage}>
-                                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                                      <XAxis dataKey="day" tick={{ fill: "#9ca3af", fontSize: 10 }} tickFormatter={fmtDay} />
-                                      <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} width={55} tickFormatter={compactNum} allowDecimals={false} />
-                                      <Tooltip formatter={(v: number) => [v.toLocaleString(), "Tokens"]} labelFormatter={fmtDay} />
-                                      <Bar dataKey="tokens" fill={color} radius={[3, 3, 0, 0]} opacity={0.85} />
-                                    </BarChart>
-                                  </ResponsiveContainer>
-                                </div>
-
-                                {/* Daily cost chart */}
-                                <div>
-                                  <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Daily Cost (USD)</p>
-                                  <ResponsiveContainer width="100%" height={160}>
-                                    <LineChart data={proj.dailyUsage}>
-                                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                                      <XAxis dataKey="day" tick={{ fill: "#9ca3af", fontSize: 10 }} tickFormatter={fmtDay} />
-                                      <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} width={65} tickFormatter={(v) => `$${v.toFixed(4)}`} />
-                                      <Tooltip formatter={(v: number) => [`$${v.toFixed(6)}`, "Cost"]} labelFormatter={fmtDay} />
-                                      <Line type="monotone" dataKey="cost" stroke={color} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 5 }} />
-                                    </LineChart>
-                                  </ResponsiveContainer>
-                                </div>
-
-                                {/* Daily table */}
-                                <div className="overflow-x-auto">
-                                  <table className="w-full text-xs">
-                                    <thead>
-                                      <tr className="border-b">
-                                        <th className="text-left py-1.5 px-2 text-muted-foreground font-medium">Date</th>
-                                        <th className="text-right py-1.5 px-2 text-muted-foreground font-medium">Tokens</th>
-                                        <th className="text-right py-1.5 px-2 text-muted-foreground font-medium">Cost</th>
-                                        <th className="text-right py-1.5 px-2 text-muted-foreground font-medium">Requests</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {proj.dailyUsage.map((row, i) => {
-                                        const req = proj.dailyRequests.find((r) => r.day === row.day);
-                                        return (
-                                          <tr key={row.day} className={i % 2 === 0 ? "bg-muted/20" : ""}>
-                                            <td className="py-1.5 px-2 font-mono">{row.day}</td>
-                                            <td className="py-1.5 px-2 text-right font-mono">{row.tokens.toLocaleString()}</td>
-                                            <td className="py-1.5 px-2 text-right font-mono text-emerald-600">${row.cost.toFixed(6)}</td>
-                                            <td className="py-1.5 px-2 text-right font-mono text-blue-600">{req?.requests ?? 0}</td>
-                                          </tr>
-                                        );
-                                      })}
-                                    </tbody>
-                                  </table>
-                                </div>
+                            <div className="text-right shrink-0 space-y-0.5">
+                              <p className="text-sm font-semibold">{compactNum(proj.totalTokens)} tokens</p>
+                              <p className="text-xs text-emerald-600">${proj.totalCost.toFixed(4)}</p>
+                            </div>
+                            <div className="w-24 shrink-0 hidden sm:block">
+                              <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
                               </div>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    );
-                  })}
-                </div>
-              </ChartCard>
+                              <p className="text-xs text-muted-foreground mt-0.5 text-right">{pct.toFixed(1)}%</p>
+                            </div>
+                            <div className="shrink-0 text-muted-foreground">
+                              {isOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            </div>
+                          </button>
+
+                          <AnimatePresence>
+                            {isOpen && (
+                              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }} className="overflow-hidden">
+                                <div className="p-4 pt-0 space-y-5 border-t bg-muted/20">
+                                  <div className="grid grid-cols-3 gap-3 pt-4">
+                                    <MiniStat label="Tokens"   value={proj.totalTokens.toLocaleString()}   color={color} />
+                                    <MiniStat label="Cost"     value={`$${proj.totalCost.toFixed(6)}`}     color={color} />
+                                    <MiniStat label="Requests" value={proj.totalRequests.toLocaleString()} color={color} />
+                                  </div>
+
+                                  <div>
+                                    <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Daily Tokens</p>
+                                    <ResponsiveContainer width="100%" height={180}>
+                                      <BarChart data={proj.dailyUsage}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                        <XAxis dataKey="day" tick={{ fill: "#9ca3af", fontSize: 10 }} tickFormatter={fmtDay} />
+                                        <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} width={55} tickFormatter={compactNum} allowDecimals={false} />
+                                        <Tooltip formatter={(v: number) => [v.toLocaleString(), "Tokens"]} labelFormatter={fmtDay} />
+                                        <Bar dataKey="tokens" fill={color} radius={[3, 3, 0, 0]} opacity={0.85} />
+                                      </BarChart>
+                                    </ResponsiveContainer>
+                                  </div>
+
+                                  <div>
+                                    <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Daily Cost (USD)</p>
+                                    <ResponsiveContainer width="100%" height={150}>
+                                      <LineChart data={proj.dailyUsage}>
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                                        <XAxis dataKey="day" tick={{ fill: "#9ca3af", fontSize: 10 }} tickFormatter={fmtDay} />
+                                        <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} width={65} tickFormatter={(v) => `$${v.toFixed(4)}`} />
+                                        <Tooltip formatter={(v: number) => [`$${v.toFixed(6)}`, "Cost"]} labelFormatter={fmtDay} />
+                                        <Line type="monotone" dataKey="cost" stroke={color} strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 5 }} />
+                                      </LineChart>
+                                    </ResponsiveContainer>
+                                  </div>
+
+                                  {/* Per-project day table */}
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                      <thead>
+                                        <tr className="border-b">
+                                          <th className="text-left py-1.5 px-2 text-muted-foreground font-medium">Date</th>
+                                          <th className="text-right py-1.5 px-2 text-muted-foreground font-medium">Tokens</th>
+                                          <th className="text-right py-1.5 px-2 text-muted-foreground font-medium">Cost</th>
+                                          <th className="text-right py-1.5 px-2 text-muted-foreground font-medium">Requests</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {proj.dailyUsage.map((row, i) => {
+                                          const req = proj.dailyRequests.find((r) => r.day === row.day);
+                                          return (
+                                            <tr key={row.day} className={i % 2 === 0 ? "bg-muted/20" : ""}>
+                                              <td className="py-1.5 px-2 font-mono">{row.day}</td>
+                                              <td className="py-1.5 px-2 text-right font-mono">{row.tokens.toLocaleString()}</td>
+                                              <td className="py-1.5 px-2 text-right font-mono text-emerald-600">${row.cost.toFixed(6)}</td>
+                                              <td className="py-1.5 px-2 text-right font-mono text-blue-600">{req?.requests ?? 0}</td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ChartCard>
+              )}
+
+              {/* ===== DAY-WISE TAB ===== */}
+              {activeTab === "daywise" && (
+                <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="space-y-8">
+
+                  {/* Stacked bar chart — all projects per day */}
+                  <ChartCard title="Daily Tokens — All Projects Stacked" icon={<TrendingUp size={18} className="text-primary" />}>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={dayChartData} margin={{ top: 4, right: 8, left: 0, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                        <XAxis dataKey="day" tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={fmtDay} />
+                        <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} width={65} allowDecimals={false} tickFormatter={compactNum} />
+                        <Tooltip
+                          formatter={(v: number, name: string) => [v.toLocaleString(), name]}
+                          labelFormatter={fmtDay}
+                        />
+                        <Legend wrapperStyle={{ fontSize: 12 }} />
+                        {data.projects.map((proj, idx) => (
+                          <Bar
+                            key={proj.projectId}
+                            dataKey={proj.projectName}
+                            stackId="a"
+                            fill={PROJECT_COLORS[idx % PROJECT_COLORS.length]}
+                            radius={idx === data.projects.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+                          />
+                        ))}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+
+                  {/* Day-wise table — one row per day, one column per project */}
+                  <ChartCard title="Day-wise Breakdown Table" icon={<TableProperties size={18} className="text-blue-500" />}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b bg-muted/40">
+                            <th className="text-left py-2 px-3 font-semibold sticky left-0 bg-muted/40 min-w-[100px]">Date</th>
+                            {data.projects.map((proj, idx) => (
+                              <th key={proj.projectId} className="text-right py-2 px-3 font-semibold min-w-[120px]">
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="w-2 h-2 rounded-full inline-block" style={{ background: PROJECT_COLORS[idx % PROJECT_COLORS.length] }} />
+                                  <span className="truncate max-w-[90px] inline-block align-middle" title={proj.projectName}>{proj.projectName}</span>
+                                </span>
+                              </th>
+                            ))}
+                            <th className="text-right py-2 px-3 font-semibold min-w-[100px]">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dayChartData.map((row, i) => (
+                            <tr key={row.day} className={i % 2 === 0 ? "bg-muted/20" : ""}>
+                              <td className="py-2 px-3 font-mono font-semibold sticky left-0 bg-inherit">{row.day}</td>
+                              {data.projects.map((proj) => {
+                                const tokens = (row[proj.projectName] as number) || 0;
+                                return (
+                                  <td key={proj.projectId} className="py-2 px-3 text-right font-mono">
+                                    {tokens > 0 ? (
+                                      <span>{tokens.toLocaleString()}</span>
+                                    ) : (
+                                      <span className="text-muted-foreground/40">—</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="py-2 px-3 text-right font-mono font-semibold text-primary">
+                                {((row["__total"] as number) || 0).toLocaleString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t font-bold bg-muted/40">
+                            <td className="py-2 px-3 sticky left-0 bg-muted/40">Total</td>
+                            {data.projects.map((proj) => (
+                              <td key={proj.projectId} className="py-2 px-3 text-right font-mono">
+                                {proj.totalTokens.toLocaleString()}
+                              </td>
+                            ))}
+                            <td className="py-2 px-3 text-right font-mono text-primary">
+                              {data.totalTokens.toLocaleString()}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </ChartCard>
+
+                  {/* Day-wise cost table */}
+                  <ChartCard title="Day-wise Cost Table (USD)" icon={<DollarSign size={18} className="text-emerald-500" />}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b bg-muted/40">
+                            <th className="text-left py-2 px-3 font-semibold sticky left-0 bg-muted/40 min-w-[100px]">Date</th>
+                            {data.projects.map((proj, idx) => (
+                              <th key={proj.projectId} className="text-right py-2 px-3 font-semibold min-w-[120px]">
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="w-2 h-2 rounded-full inline-block" style={{ background: PROJECT_COLORS[idx % PROJECT_COLORS.length] }} />
+                                  <span className="truncate max-w-[90px] inline-block align-middle" title={proj.projectName}>{proj.projectName}</span>
+                                </span>
+                              </th>
+                            ))}
+                            <th className="text-right py-2 px-3 font-semibold min-w-[100px]">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dayChartData.map((row, i) => {
+                            const totalCost = data.projects.reduce((s, p) => s + ((row[`${p.projectName}__cost`] as number) || 0), 0);
+                            return (
+                              <tr key={row.day} className={i % 2 === 0 ? "bg-muted/20" : ""}>
+                                <td className="py-2 px-3 font-mono font-semibold sticky left-0 bg-inherit">{row.day}</td>
+                                {data.projects.map((proj) => {
+                                  const cost = (row[`${proj.projectName}__cost`] as number) || 0;
+                                  return (
+                                    <td key={proj.projectId} className="py-2 px-3 text-right font-mono text-emerald-700">
+                                      {cost > 0 ? `$${cost.toFixed(6)}` : <span className="text-muted-foreground/40">—</span>}
+                                    </td>
+                                  );
+                                })}
+                                <td className="py-2 px-3 text-right font-mono font-semibold text-emerald-700">
+                                  ${totalCost.toFixed(6)}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t font-bold bg-muted/40">
+                            <td className="py-2 px-3 sticky left-0 bg-muted/40">Total</td>
+                            {data.projects.map((proj) => (
+                              <td key={proj.projectId} className="py-2 px-3 text-right font-mono text-emerald-700">
+                                ${proj.totalCost.toFixed(6)}
+                              </td>
+                            ))}
+                            <td className="py-2 px-3 text-right font-mono text-emerald-700">
+                              ${data.totalCost.toFixed(6)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  </ChartCard>
+
+                </motion.div>
+              )}
 
             </motion.div>
           )}
@@ -384,20 +549,29 @@ function fmtDay(d: string) {
 
 function compactNum(v: number) {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
-  if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
+  if (v >= 1_000)     return `${(v / 1_000).toFixed(0)}K`;
   return String(v);
 }
 
 /* ================================================================
    SUB-COMPONENTS
 ================================================================ */
+function TabBtn({ active, onClick, icon, children }: { active: boolean; onClick: () => void; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium transition border
+        ${active ? "bg-primary text-white border-primary shadow" : "bg-background text-muted-foreground border-border hover:bg-muted"}`}
+    >
+      {icon}{children}
+    </button>
+  );
+}
+
 function SummaryCard({ title, value, icon, color }: { title: string; value: string; icon: React.ReactNode; color: string }) {
   return (
-    <motion.div
-      whileHover={{ y: -4, boxShadow: "0 16px 32px rgba(0,0,0,0.12)" }}
-      transition={{ type: "spring", stiffness: 300 }}
-      className={`rounded-2xl p-5 bg-gradient-to-br ${color} text-white`}
-    >
+    <motion.div whileHover={{ y: -4, boxShadow: "0 16px 32px rgba(0,0,0,0.12)" }} transition={{ type: "spring", stiffness: 300 }}
+      className={`rounded-2xl p-5 bg-gradient-to-br ${color} text-white`}>
       <div className="flex justify-between items-start">
         <div>
           <p className="text-white/75 text-xs mb-1">{title}</p>
