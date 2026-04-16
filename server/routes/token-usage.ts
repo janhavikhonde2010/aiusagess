@@ -2,9 +2,6 @@ import { RequestHandler } from "express";
 
 /* ================= CONSTANTS ================= */
 
-const COST_PER_TOKEN = 0.0000015;
-const TOKEN_MULTIPLIER = 1.25;
-
 const USAGE_URL = "https://api.openai.com/v1/organization/usage/completions";
 const PROJECTS_URL = "https://api.openai.com/v1/organization/projects";
 
@@ -206,10 +203,11 @@ export const handleTokenUsage: RequestHandler = async (req, res) => {
         const pid = r.project_id as string;
         if (!pid) continue;
 
-        const rawTokens = Number(r.input_tokens || 0) + Number(r.output_tokens || 0);
-        const displayTokens = rawTokens * TOKEN_MULTIPLIER;
-        const cost = displayTokens * COST_PER_TOKEN;
-        const requests = Number(r.num_requests || 0);
+        // Raw token counts directly from OpenAI — no multipliers
+        const tokens = Number(r.input_tokens || 0) + Number(r.output_tokens || 0);
+        // Use cost from API if provided, otherwise 0
+        const cost = Number(r.cost ?? r.input_cost ?? 0) + Number(r.output_cost ?? 0);
+        const requests = Number(r.num_model_requests ?? r.num_requests ?? 0);
 
         // Init project if new
         if (!projectMap.has(pid)) {
@@ -223,13 +221,13 @@ export const handleTokenUsage: RequestHandler = async (req, res) => {
         }
 
         const proj = projectMap.get(pid)!;
-        proj.tokens += displayTokens;
+        proj.tokens += tokens;
         proj.cost += cost;
         proj.requests += requests;
 
         if (proj.dailyUsage.has(day)) {
           const du = proj.dailyUsage.get(day)!;
-          du.tokens += displayTokens;
+          du.tokens += tokens;
           du.cost += cost;
         }
         if (proj.dailyRequests.has(day)) {
@@ -239,7 +237,7 @@ export const handleTokenUsage: RequestHandler = async (req, res) => {
         // Global
         if (globalDailyUsage.has(day)) {
           const gdu = globalDailyUsage.get(day)!;
-          gdu.tokens += displayTokens;
+          gdu.tokens += tokens;
           gdu.cost += cost;
         }
         globalDailyRequests.set(day, (globalDailyRequests.get(day) || 0) + requests);
@@ -251,34 +249,26 @@ export const handleTokenUsage: RequestHandler = async (req, res) => {
       .map(([pid, acc]) => ({
         projectId: pid,
         projectName: projectNames.get(pid) || pid,
-        totalTokens: Math.round(acc.tokens),
-        totalCost: Number((acc.cost).toFixed(6)),
+        totalTokens: acc.tokens,
+        totalCost: acc.cost,
         totalRequests: acc.requests,
-        dailyUsage: [...acc.dailyUsage.values()].map((d) => ({
-          ...d,
-          tokens: Math.round(d.tokens),
-          cost: Number(d.cost.toFixed(6)),
-        })),
+        dailyUsage: [...acc.dailyUsage.values()],
         dailyRequests: [...acc.dailyRequests.entries()].map(([day, requests]) => ({ day, requests })),
       }))
       .sort((a, b) => b.totalTokens - a.totalTokens);
 
     const grandTotalTokens = projects.reduce((s, p) => s + p.totalTokens, 0);
-    const grandTotalCost = projects.reduce((s, p) => s + p.totalCost, 0);
+    const grandTotalCost   = projects.reduce((s, p) => s + p.totalCost,   0);
     const grandTotalRequests = projects.reduce((s, p) => s + p.totalRequests, 0);
 
     const response: UsageResponse = {
       startDate,
       endDate,
       totalTokens: grandTotalTokens,
-      totalCost: Number(grandTotalCost.toFixed(6)),
+      totalCost: grandTotalCost,
       totalRequests: grandTotalRequests,
       projects,
-      dailyUsage: [...globalDailyUsage.values()].map((d) => ({
-        ...d,
-        tokens: Math.round(d.tokens),
-        cost: Number(d.cost.toFixed(6)),
-      })),
+      dailyUsage: [...globalDailyUsage.values()],
       dailyRequests: [...globalDailyRequests.entries()].map(([day, requests]) => ({ day, requests })),
     };
 
