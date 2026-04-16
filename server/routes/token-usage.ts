@@ -68,18 +68,49 @@ function getAllDates(start: string, end: string): string[] {
 async function fetchProjectNames(apiKey: string): Promise<Map<string, string>> {
   const nameMap = new Map<string, string>();
   try {
-    const res = await fetch(`${PROJECTS_URL}?limit=100`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (res.ok) {
-      const data = await res.json();
-      const projects = Array.isArray(data?.data) ? data.data : [];
-      for (const p of projects) {
-        if (p?.id && p?.name) nameMap.set(p.id, p.name);
+    let after: string | null = null;
+    let page = 0;
+
+    // Paginate through all projects
+    while (true) {
+      page++;
+      const params = new URLSearchParams({ limit: "100" });
+      if (after) params.set("after", after);
+
+      const res = await fetch(`${PROJECTS_URL}?${params}`, {
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      });
+
+      console.log(`[fetchProjectNames] Page ${page} status:`, res.status);
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.warn(`[fetchProjectNames] Non-OK response (${res.status}):`, text);
+        break;
       }
+
+      const data = await res.json();
+      console.log("[fetchProjectNames] Response keys:", Object.keys(data || {}).join(", "));
+
+      const projects = Array.isArray(data?.data) ? data.data : [];
+      console.log(`[fetchProjectNames] Page ${page}: ${projects.length} projects`);
+
+      for (const p of projects) {
+        if (p?.id && p?.name) {
+          nameMap.set(p.id, p.name);
+          console.log(`[fetchProjectNames] Mapped: ${p.id} → "${p.name}"`);
+        }
+      }
+
+      // Stop if no more pages
+      if (!data.has_more || projects.length === 0) break;
+      after = projects[projects.length - 1]?.id ?? null;
+      if (!after) break;
     }
+
+    console.log(`[fetchProjectNames] Total names resolved: ${nameMap.size}`);
   } catch (e) {
-    console.warn("[fetchProjectNames] Could not fetch project names:", e);
+    console.warn("[fetchProjectNames] Error fetching project names:", e);
   }
   return nameMap;
 }
