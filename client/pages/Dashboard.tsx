@@ -39,12 +39,22 @@ import { motion, AnimatePresence } from "framer-motion";
 /* ---------------- TYPES ---------------- */
 interface DailyUsage { day: string; tokens: number; cost: number }
 interface DailyRequests { day: string; requests: number }
+interface ModelUsage {
+  model: string;
+  tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  requests: number;
+}
+
 interface ProjectUsage {
   projectId: string;
   projectName: string;
   totalTokens: number;
   totalCost: number;
   totalRequests: number;
+  models: ModelUsage[];
   dailyUsage: DailyUsage[];
   dailyRequests: DailyRequests[];
 }
@@ -321,6 +331,56 @@ export default function Dashboard() {
                                     <MiniStat label="Cost"     value={`$${proj.totalCost.toFixed(6)}`}     color={color} />
                                     <MiniStat label="Requests" value={proj.totalRequests.toLocaleString()} color={color} />
                                   </div>
+
+                                  {/* Model breakdown */}
+                                  {proj.models && proj.models.length > 0 && (
+                                    <div>
+                                      <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Models Used</p>
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-xs border-collapse">
+                                          <thead>
+                                            <tr className="border-b bg-muted/40">
+                                              <th className="text-left py-1.5 px-3 font-semibold">Model</th>
+                                              <th className="text-right py-1.5 px-3 font-semibold">Input Tokens</th>
+                                              <th className="text-right py-1.5 px-3 font-semibold">Output Tokens</th>
+                                              <th className="text-right py-1.5 px-3 font-semibold">Total Tokens</th>
+                                              <th className="text-right py-1.5 px-3 font-semibold">Requests</th>
+                                              <th className="text-right py-1.5 px-3 font-semibold">Cost</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {proj.models.map((m, mi) => (
+                                              <tr key={m.model} className={mi % 2 === 0 ? "bg-muted/20" : ""}>
+                                                <td className="py-1.5 px-3">
+                                                  <span className="inline-flex items-center gap-1.5">
+                                                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                                                    <span className="font-mono font-medium">{m.model}</span>
+                                                  </span>
+                                                </td>
+                                                <td className="py-1.5 px-3 text-right font-mono">{m.inputTokens.toLocaleString()}</td>
+                                                <td className="py-1.5 px-3 text-right font-mono">{m.outputTokens.toLocaleString()}</td>
+                                                <td className="py-1.5 px-3 text-right font-mono font-semibold">{m.tokens.toLocaleString()}</td>
+                                                <td className="py-1.5 px-3 text-right font-mono text-blue-600">{m.requests.toLocaleString()}</td>
+                                                <td className="py-1.5 px-3 text-right font-mono text-emerald-600">{m.cost > 0 ? `$${m.cost.toFixed(6)}` : "—"}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                          {proj.models.length > 1 && (
+                                            <tfoot>
+                                              <tr className="border-t font-bold bg-muted/40">
+                                                <td className="py-1.5 px-3">Total</td>
+                                                <td className="py-1.5 px-3 text-right font-mono">{proj.models.reduce((s,m)=>s+m.inputTokens,0).toLocaleString()}</td>
+                                                <td className="py-1.5 px-3 text-right font-mono">{proj.models.reduce((s,m)=>s+m.outputTokens,0).toLocaleString()}</td>
+                                                <td className="py-1.5 px-3 text-right font-mono">{proj.totalTokens.toLocaleString()}</td>
+                                                <td className="py-1.5 px-3 text-right font-mono text-blue-600">{proj.totalRequests.toLocaleString()}</td>
+                                                <td className="py-1.5 px-3 text-right font-mono text-emerald-600">{proj.totalCost > 0 ? `$${proj.totalCost.toFixed(6)}` : "—"}</td>
+                                              </tr>
+                                            </tfoot>
+                                          )}
+                                        </table>
+                                      </div>
+                                    </div>
+                                  )}
 
                                   <div>
                                     <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Daily Tokens</p>

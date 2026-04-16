@@ -24,12 +24,22 @@ interface DailyRequests {
   requests: number;
 }
 
+interface ModelUsage {
+  model: string;
+  tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cost: number;
+  requests: number;
+}
+
 interface ProjectUsage {
   projectId: string;
   projectName: string;
   totalTokens: number;
   totalCost: number;
   totalRequests: number;
+  models: ModelUsage[];
   dailyUsage: DailyUsage[];
   dailyRequests: DailyRequests[];
 }
@@ -68,7 +78,6 @@ async function fetchProjectNames(apiKey: string): Promise<Map<string, string>> {
     let after: string | null = null;
     let page = 0;
 
-    // Paginate through all projects
     while (true) {
       page++;
       const params = new URLSearchParams({ limit: "100" });
@@ -87,8 +96,6 @@ async function fetchProjectNames(apiKey: string): Promise<Map<string, string>> {
       }
 
       const data = await res.json();
-      console.log("[fetchProjectNames] Response keys:", Object.keys(data || {}).join(", "));
-
       const projects = Array.isArray(data?.data) ? data.data : [];
       console.log(`[fetchProjectNames] Page ${page}: ${projects.length} projects`);
 
@@ -99,7 +106,6 @@ async function fetchProjectNames(apiKey: string): Promise<Map<string, string>> {
         }
       }
 
-      // Stop if no more pages
       if (!data.has_more || projects.length === 0) break;
       after = projects[projects.length - 1]?.id ?? null;
       if (!after) break;
@@ -118,7 +124,7 @@ async function fetchUsage(startTime: number, endTime: number, days: number, apiK
     end_time: String(endTime),
     bucket_width: "1d",
     limit: String(days),
-    group_by: "project_id",
+    group_by: "project_id,model",
   });
 
   const res = await fetch(`${USAGE_URL}?${params}`, {
@@ -164,7 +170,6 @@ export const handleTokenUsage: RequestHandler = async (req, res) => {
     const days =
       Math.floor((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
-    // Fetch usage data and project names in parallel
     const [data, projectNames] = await Promise.all([
       fetchUsage(startTime, endTime, days, OPENAI_ADMIN_KEY),
       fetchProjectNames(OPENAI_ADMIN_KEY),
@@ -180,6 +185,7 @@ export const handleTokenUsage: RequestHandler = async (req, res) => {
       tokens: number;
       cost: number;
       requests: number;
+      models: Map<string, { tokens: number; inputTokens: number; outputTokens: number; cost: number; requests: number }>;
       dailyUsage: Map<string, DailyUsage>;
       dailyRequests: Map<string, number>;
     }>();
@@ -203,76 +209,88 @@ export const handleTokenUsage: RequestHandler = async (req, res) => {
         const pid = r.project_id as string;
         if (!pid) continue;
 
-        // Raw token counts directly from OpenAI — no multipliers
-        const tokens = Number(r.input_tokens || 0) + Number(r.output_tokens || 0);
-        // Use cost from API if provided, otherwise 0
-        const cost = Number(r.cost ?? r.input_cost ?? 0) + Number(r.output_cost ?? 0);
+        const model = (r.model as string) || "unknown";
+        const inputTokens  = Number(r.input_tokens || 0);
+        const outputTokens = Number(r.output_tokens || 0);
+        const tokens   = inputTokens + outputTokens;
+        const cost     = Number(r.cost ?? r.input_cost ?? 0) + Number(r.output_cost ?? 0);
         const requests = Number(r.num_model_requests ?? r.num_requests ?? 0);
 
         // Init project if new
         if (!projectMap.has(pid)) {
           const perDayUsage = new Map<string, DailyUsage>();
-          const perDayReq = new Map<string, number>();
+          const perDayReq   = new Map<string, number>();
           for (const d of allDates) {
             perDayUsage.set(d, { day: d, tokens: 0, cost: 0 });
             perDayReq.set(d, 0);
           }
-          projectMap.set(pid, { tokens: 0, cost: 0, requests: 0, dailyUsage: perDayUsage, dailyRequests: perDayReq });
+          projectMap.set(pid, { tokens: 0, cost: 0, requests: 0, models: new Map(), dailyUsage: perDayUsage, dailyRequests: perDayReq });
         }
 
         const proj = projectMap.get(pid)!;
-        proj.tokens += tokens;
-        proj.cost += cost;
+        proj.tokens   += tokens;
+        proj.cost     += cost;
         proj.requests += requests;
+
+        // Per-model accumulation
+        if (!proj.models.has(model)) {
+          proj.models.set(model, { tokens: 0, inputTokens: 0, outputTokens: 0, cost: 0, requests: 0 });
+        }
+        const m = proj.models.get(model)!;
+        m.tokens       += tokens;
+        m.inputTokens  += inputTokens;
+        m.outputTokens += outputTokens;
+        m.cost         += cost;
+        m.requests     += requests;
 
         if (proj.dailyUsage.has(day)) {
           const du = proj.dailyUsage.get(day)!;
           du.tokens += tokens;
-          du.cost += cost;
+          du.cost   += cost;
         }
         if (proj.dailyRequests.has(day)) {
           proj.dailyRequests.set(day, (proj.dailyRequests.get(day) || 0) + requests);
         }
 
-        // Global
         if (globalDailyUsage.has(day)) {
           const gdu = globalDailyUsage.get(day)!;
           gdu.tokens += tokens;
-          gdu.cost += cost;
+          gdu.cost   += cost;
         }
         globalDailyRequests.set(day, (globalDailyRequests.get(day) || 0) + requests);
       }
     }
 
-    // Build projects array sorted by total tokens desc
     const projects: ProjectUsage[] = [...projectMap.entries()]
       .map(([pid, acc]) => ({
-        projectId: pid,
-        projectName: projectNames.get(pid) || pid,
-        totalTokens: acc.tokens,
-        totalCost: acc.cost,
+        projectId:     pid,
+        projectName:   projectNames.get(pid) || pid,
+        totalTokens:   acc.tokens,
+        totalCost:     acc.cost,
         totalRequests: acc.requests,
-        dailyUsage: [...acc.dailyUsage.values()],
+        models: [...acc.models.entries()]
+          .map(([model, m]) => ({ model, ...m }))
+          .sort((a, b) => b.tokens - a.tokens),
+        dailyUsage:    [...acc.dailyUsage.values()],
         dailyRequests: [...acc.dailyRequests.entries()].map(([day, requests]) => ({ day, requests })),
       }))
       .sort((a, b) => b.totalTokens - a.totalTokens);
 
-    const grandTotalTokens = projects.reduce((s, p) => s + p.totalTokens, 0);
-    const grandTotalCost   = projects.reduce((s, p) => s + p.totalCost,   0);
+    const grandTotalTokens   = projects.reduce((s, p) => s + p.totalTokens,   0);
+    const grandTotalCost     = projects.reduce((s, p) => s + p.totalCost,     0);
     const grandTotalRequests = projects.reduce((s, p) => s + p.totalRequests, 0);
 
-    const response: UsageResponse = {
+    return res.json({
       startDate,
       endDate,
-      totalTokens: grandTotalTokens,
-      totalCost: grandTotalCost,
+      totalTokens:   grandTotalTokens,
+      totalCost:     grandTotalCost,
       totalRequests: grandTotalRequests,
       projects,
-      dailyUsage: [...globalDailyUsage.values()],
+      dailyUsage:    [...globalDailyUsage.values()],
       dailyRequests: [...globalDailyRequests.entries()].map(([day, requests]) => ({ day, requests })),
-    };
+    } as UsageResponse);
 
-    return res.json(response);
   } catch (err: any) {
     console.error("[handleTokenUsage] Error:", err.message);
 
