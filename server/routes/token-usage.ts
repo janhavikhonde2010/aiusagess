@@ -13,6 +13,7 @@ interface TokenUsageRequest {
   projectId: string;
   startDate: string;
   endDate: string;
+  adminKey?: string;
 }
 
 interface DailyUsage {
@@ -119,19 +120,18 @@ export const handleTokenUsage: RequestHandler = async (req, res) => {
     console.log("[handleTokenUsage] Request received at:", new Date().toISOString());
     console.log("[handleTokenUsage] Environment check - OPENAI_ADMIN_KEY exists:", !!process.env.OPENAI_ADMIN_KEY);
 
-    // ✅ ENV VALIDATION HERE (RUNTIME ONLY)
-    const OPENAI_ADMIN_KEY = process.env.OPENAI_ADMIN_KEY;
+    const { projectId, startDate, endDate, adminKey } = req.body as TokenUsageRequest;
+
+    // Accept key from request body first, fall back to environment variable
+    const OPENAI_ADMIN_KEY = adminKey || process.env.OPENAI_ADMIN_KEY;
 
     if (!OPENAI_ADMIN_KEY) {
-      console.error("[handleTokenUsage] ❌ CRITICAL: Missing OPENAI_ADMIN_KEY environment variable");
-      console.error("[handleTokenUsage] Available env vars:", Object.keys(process.env).join(", "));
+      console.error("[handleTokenUsage] ❌ CRITICAL: Missing OPENAI_ADMIN_KEY");
       return res.status(500).json({
-        error: "Server misconfiguration: OpenAI API key not configured. Please contact the administrator.",
-        details: "OPENAI_ADMIN_KEY environment variable is missing",
+        error: "OpenAI Admin API key is required. Please provide it in the input field.",
+        details: "No admin key provided in request or server environment",
       });
     }
-
-    const { projectId, startDate, endDate } = req.body as TokenUsageRequest;
 
     console.log("[handleTokenUsage] Request body:", {
       projectId,
